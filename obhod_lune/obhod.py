@@ -3,9 +3,10 @@ import math
 import matplotlib.pyplot as plt
 class Satellite :
 
-    def __init__(self, start_x, start_dx, start_dy, mu, mu_line) :
+    # Initialise satellite start position and velocity
+    def __init__(self, start_x, start_y, start_dx, start_dy, mu, mu_line) :
         self.x = start_x
-        self.y = 0.0
+        self.y = start_y
         self.z = 0.0
 
         self.mu = mu
@@ -15,16 +16,19 @@ class Satellite :
         self.dy = start_dy
         self.dz = 0.0
 
+    # Distance to Earth
     def R(self):
         return math.sqrt(math.pow(self.x + self.mu, 2)
                          + math.pow(self.y, 2)
                          + math.pow(self.z, 2))
 
+    # Distance to Moon
     def r(self):
         return math.sqrt(math.pow(self.x - self.mu_line, 2)
                          + math.pow(self.y, 2)
                          + math.pow(self.z, 2))
 
+    # Calculate the 2nd derivative values at current state
     def get_2nd_derivatives(self, dx, dy) :
         ddx = self.x \
               + 2 * dy \
@@ -40,6 +44,8 @@ class Satellite :
               - self.mu / math.pow(self.r(), 3) * self.z
 
         return ddx, ddy, ddz
+
+    # Apply RK4, and update values accordingly
     def make_step(self, h) :
         ddx1, ddy1, ddz1 = self.get_2nd_derivatives(self.dx, self.dy)
 
@@ -72,12 +78,151 @@ class Satellite :
 
         return self.x, self.y, self.z
 
-def power_bisection(h, mu, mu_line, start_x, low_dy = 10.7, high_dy = 10.8, max_bisections=50) :
+
+# Use bisection to find optimal power for translunar return trajectory
+# This should return a trajectory with an 8 shape
+def power_bisection_translunar(h, mu, mu_line, start_x, return_x, low_dy=10.7, high_dy=10.8, max_bisections=50):
+    for i in range(max_bisections):
+        print('Bisection {}'.format(i + 1))
+        mid_dy = (low_dy + high_dy) / 2
+
+        satellite = Satellite(start_x=start_x, start_y=0.0, start_dx=0.0, start_dy=mid_dy, mu=mu, mu_line=mu_line)
+
+        too_low = False
+        too_high = False
+
+        i_passed = False
+        ii_passed = False
+        iii_passed = False
+        iv_passed = False
+        v_passed = False
+        vi_passed = False
+
+        iv_y_acceleration_switch = False
+
+        while True:
+            min_dist = min(satellite.R(), satellite.r())
+            sat_x, sat_y, _ = satellite.make_step(h * min_dist)
+
+            if not i_passed :
+                if sat_x > -mu : # Passed Earth - above
+                    if sat_y > 0 :
+                        i_passed = True
+            elif not ii_passed :
+                if sat_y > 0.25 : # overshot above
+                    too_high = True
+                    break
+
+                if sat_y < -0.25 :
+                    too_low = True
+                    break
+
+                if sat_x > mu_line : # Passed Moon - below
+                    if sat_y < 0 :
+                        ii_passed = True
+                    else : # overshot
+                        too_high = True
+                        break
+            elif not iii_passed :
+                if sat_x > 1.25 : # Moon sling not strong enough : overshot ------>
+                    too_low = True
+                    break
+
+                if sat_y < -0.25  or sat_y > 0.25 : # Sling not strong enough - didn't get turned around properly
+                    too_low = True
+                    break
+
+                if  sat_x < mu_line : # Passed Moon 2nd time - above
+                    if sat_y > 0 :
+                        iii_passed = True
+            elif not iv_passed:
+                if sat_x > mu_line : # Already passed above Moon - but sling not strong enough to launch towards Earth
+                    too_low = True
+                    break
+
+                if satellite.dy < 0 :
+                    iv_y_acceleration_switch = True
+
+                if iv_y_acceleration_switch and satellite.dy > 0 :
+                    too_high = True
+                    break
+
+                if sat_x < -mu : # Passed above Earth without passing below Earth-Moon line
+                    too_low = True
+                    break
+
+                if sat_y > 0.25 : # Passed above Moon and overshot above the domain limit above - sling not strong enough
+                    too_low = True
+                    break
+
+                if sat_y < 0 : # Passed below Earth-Moon line
+                    iv_passed = True
+            elif not v_passed :
+                if sat_x > mu_line : # Already passed above Moon - but sling too strong, got pulled into Moon's orbit
+                    too_high = True
+                    break
+
+                if sat_y < -0.25 : # Passed above Moon and overshot below the domain - sling too strong
+                    too_low = True
+                    break
+
+                if sat_y > 0 : # Passed above Earth-Moon line again
+                    too_low = True
+                    break
+
+                if sat_x < -mu : # Passed above Moon, now passed Earth
+                    if sat_y < 0 : # Passed below
+                        v_passed = True
+
+            elif not vi_passed :
+                if sat_x < -0.25 :
+                    too_high = True
+                    break
+
+                if sat_y >= 0 :
+                    if abs(sat_x - return_x) < 1e-8 :
+                        vi_passed = True
+                        print('Found something?')
+                        break
+
+                    if sat_x < return_x :
+                        too_high = True
+                        break
+
+                    if sat_x > return_x :
+                        too_low = True
+                        break
+            else :
+                print('Found something?')
+                break
+
+
+        if too_low:
+            low_dy = mid_dy
+        elif too_high:
+            high_dy = mid_dy
+        else:
+            print('What do now?')
+            print("Current best guess {}".format(mid_dy))
+            print("I. {}, II. {}, III. {}, IV. {}, V. {}, VI. {}".format(i_passed, ii_passed, iii_passed, iv_passed,
+                                                                         v_passed, vi_passed))
+            break
+
+        print("Current best guess {}".format(mid_dy))
+        print(
+            "I. {}, II. {}, III. {}, IV. {}, V. {}, VI. {}".format(i_passed, ii_passed, iii_passed, iv_passed, v_passed,
+                                                                   vi_passed))
+
+    return mid_dy
+
+# Use bisection to find optimal power for ellipsoid trajectory, returning to Earth at height return_x
+# This should pass the Moon on the far side, bypassing the closer side
+def power_bisection_outerorbit(h, mu, mu_line, start_x, return_x, low_dy = 10.7, high_dy = 10.8, max_bisections=50) :
     for i in range(max_bisections) :
         print('Bisection {}'.format(i+1))
         mid_dy = (low_dy + high_dy) / 2
 
-        satellite = Satellite(start_x=start_x, start_dx=0.0, start_dy=mid_dy, mu=mu, mu_line=mu_line)
+        satellite = Satellite(start_x=start_x, start_y=0.0, start_dx=0.0, start_dy=mid_dy, mu=mu, mu_line=mu_line)
 
         too_low = False
         too_high = False
@@ -93,69 +238,73 @@ def power_bisection(h, mu, mu_line, start_x, low_dy = 10.7, high_dy = 10.8, max_
             sat_x, sat_y, _ = satellite.make_step(h * min_dist)
 
             if not i_passed :
-                if sat_x > mu : # Passed Earth - above
+                if sat_x > -mu : # Passed Earth - above
                     if sat_y > 0 :
                         i_passed = True
             elif not ii_passed :
-                if sat_x > mu_line : # Passed Moon - below
-                    if sat_y < 0 :
-                        ii_passed = True
-                    else : # overshot
-                        too_high = True
-                        break
-            elif not iii_passed :
-                if sat_x > 1.25 : # Moon sling not strong enough : overshot ------>
-                    too_low = True
-                    break
-
-                if  sat_x < mu_line : # Passed Moon 2nd time - above
-                    if sat_y > 0 :
-                        iii_passed = True
-            elif not iv_passed :
-                if sat_x > mu_line : # Already passed above Moon - but sling too strong, got pulled into Moon's orbit
-                    if sat_y > 0 :
-                        too_low = True
-                        break
-                    else :
-                        too_high = True
-                        break
-
-                if sat_y > 0.25 : # Passed above Moon and overshot above the domain limit above - sling not strong enough
-                    too_low = True
-                    break
-
-                if sat_y < -0.25 : # Passed above Moon and overshot below the domain - sling too strong
+                if sat_y > 0.25 : # overshot above
                     too_high = True
                     break
 
-                if sat_x < mu : # Passed above Moon, now passed Earth
-                    if sat_y < 0 : # Passed below
-                        iv_passed = True
-                    else : # Passed above
+                if sat_y < -0.25 :
+                    too_low = True
+                    break
+
+                if sat_x > mu_line : # Passed Moon - above
+                    if sat_y > 0 :
+                        ii_passed = True
+                    else : # undershot
                         too_low = True
                         break
+            elif not iii_passed :
+                if sat_x > 1.25 : # Moon sling not strong enough : overshot ------>
+                    too_high = True
+                    break
 
+                if sat_y < -0.25  or sat_y > 0.25 : # Sling not strong enough - didn't get turned around properly
+                    too_high = True
+                    break
+
+                if  sat_x < mu_line : # Passed Moon 2nd time - above
+                    if sat_y < 0 :
+                        iii_passed = True
+            elif not iv_passed:
+                if sat_x > mu_line:  # Already passed above Moon - but sling too strong, got pulled into Moon's orbit
+                    too_low = True
+                    break
+
+                if sat_y < -0.25:  # Passed above Moon and overshot below the domain - sling too strong
+                    too_high = True
+                    break
+
+                if sat_y >= 0:  # Passed above Earth-Moon line again - sling too strong
+                    too_low = True
+                    break
+
+                if sat_x < -mu:  # Passed above Moon, now passed Earth
+                    if sat_y < 0:  # Passed below
+                        iv_passed = True
             elif not v_passed :
                 if sat_x < -0.25 :
                     too_high = True
                     break
 
                 if sat_y >= 0 :
-                    if abs(sat_x - start_x) < 1e-8 :
+                    if abs(sat_x - return_x) < 1e-7 :
+                        v_passed = True
                         print('Found something?')
                         break
 
-                    if sat_x < start_x :
+                    if sat_x < return_x :
                         too_high = True
                         break
 
-                    if sat_x > start_x :
+                    if sat_x > return_x :
                         too_low = True
                         break
             else :
-                print('Found something?')
+                print('All passed?')
                 break
-
 
         if too_low :
             low_dy = mid_dy
@@ -163,17 +312,143 @@ def power_bisection(h, mu, mu_line, start_x, low_dy = 10.7, high_dy = 10.8, max_
             high_dy = mid_dy
         else :
             print('What do now?')
+            print("Current best guess {}".format(mid_dy))
+            print("I. {}, II. {}, III. {}, IV. {}, V. {}".format(i_passed, ii_passed, iii_passed, iv_passed,
+                                                                         v_passed))
             break
 
         print("Current best guess {}".format(mid_dy))
+        print("I. {}, II. {}, III. {}, IV. {}, V. {}".format(i_passed, ii_passed, iii_passed, iv_passed, v_passed))
 
     return mid_dy
 
+
+# Use bisection to find an optimal start velocity to enter Moon's orbit
+# This should leave Earth, and park in Moon's orbit
+def power_bisection_lunarorbit(h, mu, mu_line, start_x, return_x, low_dy=10.7, high_dy=10.8, max_bisections=50):
+    for i in range(max_bisections):
+        print('Bisection {}'.format(i + 1))
+        mid_dy = (low_dy + high_dy) / 2
+
+        satellite = Satellite(start_x=start_x, start_y=0.0, start_dx=0.0, start_dy=mid_dy, mu=mu, mu_line=mu_line)
+
+        too_low = False
+        too_high = False
+
+        i_passed = False
+        ii_passed = False
+        iii_passed = False
+        iv_passed = False
+
+        y_in = None
+
+        while True:
+            min_dist = min(satellite.R(), satellite.r())
+            sat_x, sat_y, _ = satellite.make_step(h * min_dist)
+
+            if not i_passed:
+                if sat_x > -mu:  # Passed Earth - above
+                    if sat_y > 0:
+                        i_passed = True
+            elif not ii_passed:
+                if sat_y > 0.25:  # overshot above
+                    too_high = True
+                    break
+
+                if sat_y < -0.25:
+                    too_low = True
+                    break
+
+                if sat_x > mu_line:  # Passed Moon - below
+                    if sat_y < 0:
+                        ii_passed = True
+                        y_in = sat_y
+                    else:  # overshot
+                        too_high = True
+                        break
+            elif not iii_passed:
+                if sat_x > 1.25:  # Moon sling not strong enough : overshot ------>
+                    too_low = True
+                    break
+
+                if sat_y < -0.25 or sat_y > 0.25:  # Sling not strong enough - didn't get turned around properly
+                    too_low = True
+                    break
+
+                if sat_x < mu_line:  # Passed Moon 2nd time - above
+                    if sat_y > 0:
+                        iii_passed = True
+                        """
+                        if abs(sat_y + y_in) < 1e-7:
+                            iii_passed = True
+
+                        if sat_y < y_in : # Got pulled in too tightly
+                            too_high = True
+                            break
+
+                        if sat_y > y_in : # Got pulled in too weakly
+                            too_low = True
+                            break
+                        """
+
+            elif not iv_passed:
+                if sat_x > mu_line:  # Passed Moon again
+                    if sat_y < 0 : # Below
+                        iv_passed = True
+                        print('Found something?')
+                        break
+                        """
+                        if abs(sat_y - y_in) < 1e-7:
+                            iv_passed = True
+                            print('Found something?')
+                            break
+
+                        if sat_y < y_in : # Got pulled in too tightly
+                            too_high = True
+                            break
+
+                        if sat_y > y_in : # Got pulled in too weakly
+                            too_low = True
+                            break
+                        """
+                    else : # otherwise pull not strong enough
+                        too_low = True
+                        break
+
+                if sat_x < -mu:  # Passed towards Earth
+                    too_low = True
+                    break
+
+                if sat_y > 0.25:  # Passed above Moon and overshot above the domain limit above - sling not strong enough
+                    too_low = True
+                    break
+
+            else:
+                print('Found something?')
+                break
+
+        if too_low:
+            low_dy = mid_dy
+        elif too_high:
+            high_dy = mid_dy
+        else:
+            print('What do now?')
+            print("Current best guess {}".format(mid_dy))
+            print("I. {}, II. {}, III. {}, IV. {}".format(i_passed, ii_passed, iii_passed, iv_passed))
+            break
+
+        print("Current best guess {}".format(mid_dy))
+        print(
+            "I. {}, II. {}, III. {}, IV. {}".format(i_passed, ii_passed, iii_passed, iv_passed))
+
+    return mid_dy
+
+# Draw the simulation with the specified start parameters
 def draw_simulation(h, mu, mu_line, start_x, start_dy, n_steps) :
     x = [start_x]
     y = [0]
 
-    satellite = Satellite(start_x=start_x, start_dx=0.0, start_dy=start_dy, mu=mu, mu_line=mu_line)
+    satellite = Satellite(start_x=start_x, start_y=0.0, start_dx=0.0, start_dy=start_dy, mu=mu, mu_line=mu_line)
 
     for i in range(n_steps):
         if i % 10000 == 0:
@@ -205,8 +480,8 @@ if __name__ == "__main__" :
     mu = m / (m + M)
     mu_line = M / (m + M)
 
-    n_steps = 10000 * 8000
-    h = 1e-6 * 3
+    n_steps = 10000 * 160
+    h = 1e-5
 
     unit_in_km = 384400.0 # Earth-Moon distance
     st_orbit = 350.0  # stable orbit altitude
@@ -215,20 +490,43 @@ if __name__ == "__main__" :
     start_offset = (st_orbit + R) / unit_in_km # position of satellite in units
     start_x = - mu - start_offset
 
-    #escape velocity
-    low_dy = 10.7 # Undershoots Moon (manual check)
+    return_offset = (350 + R) / unit_in_km
+    return_x = - mu - return_offset
+
+    #escape velocity - start 6350km above surface
+    #low_dy = 7.8 # Undershoots Moon (manual check)
+    #high_dy = 7.825 # Overshoots Moon (manual check)
+
+    # escape velocity - start 350km above surface
+    low_dy = 10.7  # Undershoots Moon (manual check)
     high_dy = 10.8 # Overshoots Moon (manual check)
+    mid_dy = 0.0
+    max_bisections = 60
 
-    max_bisections = 50
+    # Determine optimal power - 8 shape
+    #mid_dy = power_bisection_translunar(h=h, mu=mu, mu_line=mu_line, start_x=start_x, return_x=return_x,
+    #                         low_dy=low_dy, high_dy=high_dy, max_bisections=max_bisections)
 
-    # Determine optimal power
-    mid_dy = power_bisection(h=h, mu=mu, mu_line=mu_line, start_x=start_x,
-                             low_dy=low_dy, high_dy=high_dy, max_bisections=max_bisections)
+    # Determine optimal power - ellipse shape
+    mid_dy = power_bisection_outerorbit(h=h, mu=mu, mu_line=mu_line, start_x=start_x, return_x=return_x,
+                                        low_dy=low_dy, high_dy=high_dy, max_bisections=max_bisections)
+
+    # Determine optimal power - enter Moon's orbit
+    #mid_dy = power_bisection_lunarorbit(h=h, mu=mu, mu_line=mu_line, start_x=start_x, return_x=return_x,
+    #                                    low_dy=low_dy, high_dy=high_dy, max_bisections=max_bisections)
 
     print('Chose :')
     print(mid_dy)
+
+    # some values from previous experiments
     # 10.749959424999815
-    mid_dy = 10.749959424999815
+    #mid_dy = 10.751011106744409
+    #mid_dy = 7.8203125
+
+    # For 350 + 6371 :
+    # Enter lunar orbit : 10.75009765625
+    # Outer Moon bypass with Earth return at same altitude : 10.751011106744409
+    # 8 shape : Didn't find an appropriate solution - would need more tweaking
 
     draw_simulation(h=h, mu=mu, mu_line=mu_line, start_x=start_x, start_dy=mid_dy, n_steps=n_steps)
     
